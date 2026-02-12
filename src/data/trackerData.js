@@ -24,11 +24,61 @@ export const workouts = [
 ];
 
 export const shoes = [
-  { name: 'Jordan 1 High', brand: 'Nike', status: 'Owned', wearCount: 17 },
-  { name: 'Yeezy 350', brand: 'Adidas', status: 'Owned', wearCount: 11 },
-  { name: 'Gel Kayano 30', brand: 'Asics', status: 'Active', wearCount: 24 },
-  { name: 'FuelCell Rebel', brand: 'New Balance', status: 'Wishlist', wearCount: 0 },
-  { name: 'Chuck 70', brand: 'Converse', status: 'Owned', wearCount: 8 }
+  {
+    id: 'shoe-1',
+    name: 'Jordan 1 High',
+    brand: 'Nike',
+    whereBought: 'StockX',
+    purchaseDate: '2025-07-14',
+    price: 265,
+    wearCount: 17,
+    notes: 'Chicago colorway. Fits true to size.',
+    imageDataUrl: ''
+  },
+  {
+    id: 'shoe-2',
+    name: 'Yeezy 350',
+    brand: 'Adidas',
+    whereBought: 'Adidas Confirmed',
+    purchaseDate: '2025-05-09',
+    price: 230,
+    wearCount: 11,
+    notes: 'Great casual travel pair.',
+    imageDataUrl: ''
+  },
+  {
+    id: 'shoe-3',
+    name: 'Gel Kayano 30',
+    brand: 'Asics',
+    whereBought: 'Fleet Feet',
+    purchaseDate: '2026-01-03',
+    price: 160,
+    wearCount: 24,
+    notes: 'Primary walking and long-day shoe.',
+    imageDataUrl: ''
+  },
+  {
+    id: 'shoe-4',
+    name: 'FuelCell Rebel',
+    brand: 'New Balance',
+    whereBought: 'New Balance',
+    purchaseDate: '2025-11-22',
+    price: 140,
+    wearCount: 0,
+    notes: 'Reserved for speed sessions.',
+    imageDataUrl: ''
+  },
+  {
+    id: 'shoe-5',
+    name: 'Chuck 70',
+    brand: 'Converse',
+    whereBought: 'Converse Outlet',
+    purchaseDate: '2024-09-30',
+    price: 85,
+    wearCount: 8,
+    notes: 'Reliable daily pair.',
+    imageDataUrl: ''
+  }
 ];
 
 export const foodLogs = [

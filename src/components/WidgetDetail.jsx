@@ -6,12 +6,16 @@ const WidgetDetail = ({
   widgets,
   pokerSessions,
   hikingSessions,
+  shoeCollection,
   onAddPokerSession,
   onDeletePokerSession,
   onUpdatePokerSession,
   onAddHikeSession,
   onDeleteHikeSession,
-  onUpdateHikeSession
+  onUpdateHikeSession,
+  onAddShoeEntry,
+  onDeleteShoeEntry,
+  onUpdateShoeEntry
 }) => {
   const { widgetId } = useParams();
   const widget = widgets.find((entry) => entry.id === widgetId);
@@ -48,11 +52,15 @@ const WidgetDetail = ({
         hikingSessions={hikingSessions}
         onAddHikeSession={onAddHikeSession}
         onAddPokerSession={onAddPokerSession}
+        onAddShoeEntry={onAddShoeEntry}
         onDeleteHikeSession={onDeleteHikeSession}
         onDeletePokerSession={onDeletePokerSession}
+        onDeleteShoeEntry={onDeleteShoeEntry}
         onUpdatePokerSession={onUpdatePokerSession}
         onUpdateHikeSession={onUpdateHikeSession}
+        onUpdateShoeEntry={onUpdateShoeEntry}
         pokerSessions={pokerSessions}
+        shoeCollection={shoeCollection}
         widget={widget}
       />
     </main>

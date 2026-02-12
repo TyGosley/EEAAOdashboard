@@ -1,10 +1,10 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import {
   businessData,
   foodLogs,
   hikingSessions as hikingSessionSeed,
   pokerSessions as pokerSessionSeed,
-  shoes,
+  shoes as shoeSeed,
   workouts
 } from '../data/trackerData';
 import {
@@ -20,6 +20,13 @@ import { CARD_OPTIONS, getMoveRecommendation, runPokerSimulation } from '../util
 const panelClass = 'rounded-2xl border border-cyan-400/30 bg-slate-900/55 p-5 text-cyan-50 shadow-neon';
 const blockClass = 'rounded-xl border border-cyan-200/20 bg-black/30 p-4';
 const formatMiles = (value) => `${Number(value).toFixed(2)} mi`;
+const formatPrice = (value) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
 const formatDuration = (value) => {
   const minutes = Number(value);
   if (!Number.isFinite(minutes) || minutes <= 0) return '--';
@@ -44,6 +51,30 @@ const simulatorPositions = [
 ];
 const simulationIterationOptions = [1500, 3000, 6000];
 const boardCardLabels = ['Flop 1', 'Flop 2', 'Flop 3', 'Turn', 'River'];
+const normalizeShoeEntry = (entry, index = 0) => {
+  const parsedPrice = Number(entry.price);
+  const parsedWearCount = Number(entry.wearCount);
+
+  return {
+    id: entry.id ?? null,
+    key: entry.id ?? `shoe-${index}`,
+    name: entry.name ?? '',
+    brand: entry.brand ?? 'Unknown',
+    whereBought: entry.whereBought ?? entry.store ?? entry.status ?? '',
+    purchaseDate: entry.purchaseDate ?? entry.dateBought ?? '',
+    price: Number.isFinite(parsedPrice) ? parsedPrice : 0,
+    wearCount: Number.isFinite(parsedWearCount) ? parsedWearCount : 0,
+    notes: entry.notes ?? '',
+    imageDataUrl: entry.imageDataUrl ?? ''
+  };
+};
+const readFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(new Error('Failed to read image file.'));
+    reader.readAsDataURL(file);
+  });
 
 const timeframeOptions = Object.entries(timeWindows);
 
@@ -1204,19 +1235,373 @@ const WorkoutPanel = () => {
   );
 };
 
-const ShoesPanel = () => {
+const ShoesPanel = ({ shoeCollection, onAddShoeEntry, onDeleteShoeEntry, onUpdateShoeEntry }) => {
   const [brand, setBrand] = useState('all');
+  const [shoeName, setShoeName] = useState('');
+  const [shoeBrand, setShoeBrand] = useState('');
+  const [whereBought, setWhereBought] = useState('');
+  const [purchaseDate, setPurchaseDate] = useState(() => getTodayLocal());
+  const [shoePrice, setShoePrice] = useState('');
+  const [wearCount, setWearCount] = useState('0');
+  const [shoeNotes, setShoeNotes] = useState('');
+  const [shoeImageDataUrl, setShoeImageDataUrl] = useState('');
+  const [shoeImageName, setShoeImageName] = useState('');
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
+  const [expandedBrands, setExpandedBrands] = useState({});
+  const [editingShoeId, setEditingShoeId] = useState(null);
+  const [editShoeName, setEditShoeName] = useState('');
+  const [editShoeBrand, setEditShoeBrand] = useState('');
+  const [editWhereBought, setEditWhereBought] = useState('');
+  const [editPurchaseDate, setEditPurchaseDate] = useState('');
+  const [editShoePrice, setEditShoePrice] = useState('');
+  const [editWearCount, setEditWearCount] = useState('');
+  const [editShoeNotes, setEditShoeNotes] = useState('');
+  const [editShoeImageDataUrl, setEditShoeImageDataUrl] = useState('');
+  const [editShoeImageName, setEditShoeImageName] = useState('');
 
-  const brands = ['all', ...new Set(shoes.map((item) => item.brand))];
-  const filtered = shoes.filter((shoe) => brand === 'all' || shoe.brand === brand);
+  const entries = useMemo(
+    () =>
+      (shoeCollection ?? shoeSeed)
+        .map((entry, index) => normalizeShoeEntry(entry, index))
+        .sort((a, b) => {
+          const brandCompare = a.brand.localeCompare(b.brand);
+          if (brandCompare !== 0) return brandCompare;
+          return a.name.localeCompare(b.name);
+        }),
+    [shoeCollection]
+  );
+
+  const brands = useMemo(
+    () => ['all', ...new Set(entries.map((item) => item.brand).filter(Boolean))],
+    [entries]
+  );
+  const filtered = useMemo(
+    () => entries.filter((entry) => brand === 'all' || entry.brand === brand),
+    [brand, entries]
+  );
+  const groupedByBrand = useMemo(() => {
+    const groups = new Map();
+
+    filtered.forEach((entry) => {
+      const brandName = entry.brand || 'Unknown';
+      if (!groups.has(brandName)) {
+        groups.set(brandName, []);
+      }
+      groups.get(brandName).push(entry);
+    });
+
+    return Array.from(groups.entries()).map(([brandName, brandEntries]) => ({
+      brand: brandName,
+      entries: brandEntries,
+      totalWears: brandEntries.reduce((sum, entry) => sum + Math.max(0, entry.wearCount), 0),
+      totalValue: brandEntries.reduce((sum, entry) => sum + Math.max(0, entry.price), 0)
+    }));
+  }, [filtered]);
+  const totalWears = filtered.reduce((sum, entry) => sum + Math.max(0, entry.wearCount), 0);
+  const totalValue = filtered.reduce((sum, entry) => sum + Math.max(0, entry.price), 0);
+  const averageWears = filtered.length ? totalWears / filtered.length : 0;
+
+  useEffect(() => {
+    setExpandedBrands((prev) => {
+      const next = { ...prev };
+      let changed = false;
+
+      groupedByBrand.forEach((group) => {
+        if (next[group.brand] === undefined) {
+          next[group.brand] = true;
+          changed = true;
+        }
+      });
+
+      Object.keys(next).forEach((brandName) => {
+        if (!groupedByBrand.some((group) => group.brand === brandName)) {
+          delete next[brandName];
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [groupedByBrand]);
+
+  const handleShoeImageChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setShoeImageDataUrl('');
+      setShoeImageName('');
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) return;
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setShoeImageDataUrl(dataUrl);
+      setShoeImageName(file.name);
+    } catch {
+      setShoeImageDataUrl('');
+      setShoeImageName('');
+    }
+  };
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    if (!onAddShoeEntry) return;
+
+    const name = shoeName.trim();
+    const brandName = shoeBrand.trim();
+    const store = whereBought.trim();
+    const notes = shoeNotes.trim();
+    const parsedPrice = Number(shoePrice);
+    const parsedWearCount = Number(wearCount);
+
+    if (
+      !name ||
+      !brandName ||
+      !store ||
+      !purchaseDate ||
+      Number.isNaN(parsedPrice) ||
+      parsedPrice < 0 ||
+      Number.isNaN(parsedWearCount) ||
+      parsedWearCount < 0
+    ) {
+      return;
+    }
+
+    onAddShoeEntry({
+      name,
+      brand: brandName,
+      whereBought: store,
+      purchaseDate,
+      price: Number(parsedPrice.toFixed(2)),
+      wearCount: Math.round(parsedWearCount),
+      notes,
+      imageDataUrl: shoeImageDataUrl
+    });
+
+    setShoeName('');
+    setShoeBrand('');
+    setWhereBought('');
+    setPurchaseDate(getTodayLocal());
+    setShoePrice('');
+    setWearCount('0');
+    setShoeNotes('');
+    setShoeImageDataUrl('');
+    setShoeImageName('');
+  };
+
+  const resetShoeEditState = () => {
+    setEditingShoeId(null);
+    setEditShoeName('');
+    setEditShoeBrand('');
+    setEditWhereBought('');
+    setEditPurchaseDate('');
+    setEditShoePrice('');
+    setEditWearCount('');
+    setEditShoeNotes('');
+    setEditShoeImageDataUrl('');
+    setEditShoeImageName('');
+  };
+
+  const startEditingShoe = (shoe) => {
+    setPendingDeleteId(null);
+    setEditingShoeId(shoe.id ?? null);
+    setEditShoeName(shoe.name ?? '');
+    setEditShoeBrand(shoe.brand ?? '');
+    setEditWhereBought(shoe.whereBought ?? '');
+    setEditPurchaseDate(shoe.purchaseDate ?? '');
+    setEditShoePrice(String(Number(shoe.price ?? 0).toFixed(2)));
+    setEditWearCount(String(Math.max(0, Math.round(shoe.wearCount ?? 0))));
+    setEditShoeNotes(shoe.notes ?? '');
+    setEditShoeImageDataUrl(shoe.imageDataUrl ?? '');
+    setEditShoeImageName('');
+  };
+
+  const handleEditShoeImageChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return;
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setEditShoeImageDataUrl(dataUrl);
+      setEditShoeImageName(file.name);
+    } catch {
+      setEditShoeImageDataUrl('');
+      setEditShoeImageName('');
+    }
+  };
+
+  const handleSaveShoeEdit = (shoeId) => {
+    if (!shoeId || !onUpdateShoeEntry) return;
+
+    const name = editShoeName.trim();
+    const brandName = editShoeBrand.trim();
+    const store = editWhereBought.trim();
+    const notes = editShoeNotes.trim();
+    const parsedPrice = Number(editShoePrice);
+    const parsedWearCount = Number(editWearCount);
+
+    if (
+      !name ||
+      !brandName ||
+      !store ||
+      !editPurchaseDate ||
+      Number.isNaN(parsedPrice) ||
+      parsedPrice < 0 ||
+      Number.isNaN(parsedWearCount) ||
+      parsedWearCount < 0
+    ) {
+      return;
+    }
+
+    onUpdateShoeEntry(shoeId, {
+      name,
+      brand: brandName,
+      whereBought: store,
+      purchaseDate: editPurchaseDate,
+      price: Number(parsedPrice.toFixed(2)),
+      wearCount: Math.round(parsedWearCount),
+      notes,
+      imageDataUrl: editShoeImageDataUrl
+    });
+
+    resetShoeEditState();
+  };
+
+  const toggleBrandGroup = (brandName) => {
+    setExpandedBrands((prev) => ({ ...prev, [brandName]: !(prev[brandName] ?? true) }));
+  };
 
   return (
     <section className={panelClass}>
-      <h2 className="mb-1 font-display text-2xl">Shoe Collection</h2>
-      <p className="mb-4 text-sm text-cyan-100/80">Filter your collection by brand and activity status.</p>
+      <h2 className="mb-1 font-display text-2xl">Shoe Collection Locker</h2>
+      <p className="mb-4 text-sm text-cyan-100/80">
+        Log each pair with brand, purchase details, price, wear count, notes, and an optional image.
+      </p>
+
+      <form className="mb-4 grid gap-3 rounded-xl border border-cyan-200/20 bg-black/25 p-3 lg:grid-cols-2" onSubmit={handleSubmit}>
+        <label className="text-sm text-cyan-100/80">
+          Shoe
+          <input
+            className="mt-1 w-full rounded-lg border border-cyan-700 bg-slate-950/65 px-3 py-1.5 text-cyan-100"
+            onChange={(event) => setShoeName(event.target.value)}
+            placeholder="Jordan 1 High"
+            required
+            type="text"
+            value={shoeName}
+          />
+        </label>
+
+        <label className="text-sm text-cyan-100/80">
+          Brand
+          <input
+            className="mt-1 w-full rounded-lg border border-cyan-700 bg-slate-950/65 px-3 py-1.5 text-cyan-100"
+            onChange={(event) => setShoeBrand(event.target.value)}
+            placeholder="Nike"
+            required
+            type="text"
+            value={shoeBrand}
+          />
+        </label>
+
+        <label className="text-sm text-cyan-100/80">
+          Where Bought
+          <input
+            className="mt-1 w-full rounded-lg border border-cyan-700 bg-slate-950/65 px-3 py-1.5 text-cyan-100"
+            onChange={(event) => setWhereBought(event.target.value)}
+            placeholder="GOAT, Nike, local shop..."
+            required
+            type="text"
+            value={whereBought}
+          />
+        </label>
+
+        <label className="text-sm text-cyan-100/80">
+          When Bought
+          <input
+            className="mt-1 w-full rounded-lg border border-cyan-700 bg-slate-950/65 px-3 py-1.5 text-cyan-100"
+            onChange={(event) => setPurchaseDate(event.target.value)}
+            required
+            type="date"
+            value={purchaseDate}
+          />
+        </label>
+
+        <label className="text-sm text-cyan-100/80">
+          Price
+          <input
+            className="mt-1 w-full rounded-lg border border-cyan-700 bg-slate-950/65 px-3 py-1.5 text-cyan-100"
+            min="0"
+            onChange={(event) => setShoePrice(event.target.value)}
+            required
+            step="0.01"
+            type="number"
+            value={shoePrice}
+          />
+        </label>
+
+        <label className="text-sm text-cyan-100/80">
+          Wears
+          <input
+            className="mt-1 w-full rounded-lg border border-cyan-700 bg-slate-950/65 px-3 py-1.5 text-cyan-100"
+            min="0"
+            onChange={(event) => setWearCount(event.target.value)}
+            required
+            step="1"
+            type="number"
+            value={wearCount}
+          />
+        </label>
+
+        <label className="text-sm text-cyan-100/80 lg:col-span-2">
+          Notes
+          <textarea
+            className="mt-1 min-h-20 w-full rounded-lg border border-cyan-700 bg-slate-950/65 px-3 py-2 text-cyan-100"
+            onChange={(event) => setShoeNotes(event.target.value)}
+            placeholder="Colorway, condition, sizing notes, outfit ideas..."
+            value={shoeNotes}
+          />
+        </label>
+
+        <label className="text-sm text-cyan-100/80 lg:col-span-2">
+          Shoe Image (optional)
+          <input
+            accept="image/*"
+            className="mt-1 w-full rounded-lg border border-cyan-700 bg-slate-950/65 px-3 py-2 text-cyan-100 file:mr-3 file:rounded file:border-0 file:bg-cyan-400/20 file:px-2 file:py-1 file:text-cyan-50"
+            onChange={handleShoeImageChange}
+            type="file"
+          />
+          {shoeImageName ? (
+            <p className="mt-1 text-xs text-cyan-200/80">Selected: {shoeImageName}</p>
+          ) : null}
+          {shoeImageDataUrl ? (
+            <div className="mt-2 flex items-center gap-3">
+              <img alt="Shoe preview" className="h-16 w-16 rounded-lg border border-cyan-300/30 object-cover" src={shoeImageDataUrl} />
+              <button
+                className="rounded border border-cyan-300/40 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-100 transition hover:bg-cyan-500/20"
+                onClick={() => {
+                  setShoeImageDataUrl('');
+                  setShoeImageName('');
+                }}
+                type="button"
+              >
+                Remove Image
+              </button>
+            </div>
+          ) : null}
+        </label>
+
+        <button
+          className="rounded-lg border border-cyan-300/60 bg-cyan-300/15 px-4 py-2 text-sm font-medium text-cyan-50 transition hover:bg-cyan-300/25 lg:col-span-2"
+          type="submit"
+        >
+          Add To Locker
+        </button>
+      </form>
 
       <label className="mb-4 inline-flex items-center gap-2 text-sm">
-        <span className="text-cyan-100/85">Brand</span>
+        <span className="text-cyan-100/85">Sort By Brand</span>
         <select
           className="rounded-lg border border-cyan-700 bg-slate-950/70 px-3 py-1.5 text-cyan-100"
           onChange={(event) => setBrand(event.target.value)}
@@ -1230,38 +1615,270 @@ const ShoesPanel = () => {
         </select>
       </label>
 
-      <div className="mb-4 grid gap-3 md:grid-cols-3">
+      <div className="mb-4 grid gap-3 md:grid-cols-4">
         <div className={blockClass}>
           <p className="text-xs uppercase tracking-widest text-cyan-200/70">Total Pairs</p>
           <p className="text-xl font-semibold">{filtered.length}</p>
         </div>
         <div className={blockClass}>
-          <p className="text-xs uppercase tracking-widest text-cyan-200/70">Active</p>
-          <p className="text-xl font-semibold text-emerald-300">
-            {filtered.filter((item) => item.status === 'Active').length}
-          </p>
+          <p className="text-xs uppercase tracking-widest text-cyan-200/70">Total Wears</p>
+          <p className="text-xl font-semibold text-emerald-300">{totalWears}</p>
         </div>
         <div className={blockClass}>
-          <p className="text-xs uppercase tracking-widest text-cyan-200/70">Wishlist</p>
-          <p className="text-xl font-semibold text-amber-200">
-            {filtered.filter((item) => item.status === 'Wishlist').length}
-          </p>
+          <p className="text-xs uppercase tracking-widest text-cyan-200/70">Avg Wears / Pair</p>
+          <p className="text-xl font-semibold">{formatNumber(averageWears, 1)}</p>
+        </div>
+        <div className={blockClass}>
+          <p className="text-xs uppercase tracking-widest text-cyan-200/70">Total Collection Value</p>
+          <p className="text-xl font-semibold text-cyan-50">{formatPrice(totalValue)}</p>
         </div>
       </div>
 
-      <ul className="space-y-2">
-        {filtered.map((shoe) => (
-          <li className="rounded-lg border border-cyan-200/15 bg-black/25 px-3 py-2" key={`${shoe.brand}-${shoe.name}`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">{shoe.name}</p>
-                <p className="text-xs text-cyan-100/75">{shoe.brand} • {shoe.status}</p>
+      {groupedByBrand.length ? (
+        <div className="space-y-3">
+          {groupedByBrand.map((group) => {
+            const isExpanded = expandedBrands[group.brand] ?? true;
+
+            return (
+              <div className="rounded-xl border border-cyan-300/20 bg-black/20" key={group.brand}>
+                <button
+                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-medium text-cyan-100 transition hover:bg-cyan-900/20"
+                  onClick={() => toggleBrandGroup(group.brand)}
+                  type="button"
+                >
+                  <span>{group.brand}</span>
+                  <span className="text-xs text-cyan-200/80">
+                    {group.entries.length} pairs • {group.totalWears} wears • {isExpanded ? 'Hide' : 'Show'}
+                  </span>
+                </button>
+
+                {isExpanded ? (
+                  <ul className="space-y-0 border-t border-cyan-300/20">
+                    {group.entries.map((shoe, index) => {
+                      const canDelete = Boolean(shoe.id && onDeleteShoeEntry);
+                      const canEdit = Boolean(shoe.id && onUpdateShoeEntry);
+                      const needsConfirm = pendingDeleteId === shoe.id;
+                      const isEditing = editingShoeId === shoe.id;
+
+                      if (isEditing) {
+                        return (
+                          <li className="border-t border-cyan-100/10 px-3 py-3" key={shoe.key ?? `${shoe.brand}-${shoe.name}-${index}`}>
+                            <div className="grid gap-2 lg:grid-cols-2">
+                              <label className="text-xs text-cyan-100/80">
+                                Shoe
+                                <input
+                                  className="mt-1 w-full rounded border border-cyan-700 bg-slate-950/65 px-2 py-1 text-sm text-cyan-100"
+                                  onChange={(event) => setEditShoeName(event.target.value)}
+                                  type="text"
+                                  value={editShoeName}
+                                />
+                              </label>
+                              <label className="text-xs text-cyan-100/80">
+                                Brand
+                                <input
+                                  className="mt-1 w-full rounded border border-cyan-700 bg-slate-950/65 px-2 py-1 text-sm text-cyan-100"
+                                  onChange={(event) => setEditShoeBrand(event.target.value)}
+                                  type="text"
+                                  value={editShoeBrand}
+                                />
+                              </label>
+                              <label className="text-xs text-cyan-100/80">
+                                Where Bought
+                                <input
+                                  className="mt-1 w-full rounded border border-cyan-700 bg-slate-950/65 px-2 py-1 text-sm text-cyan-100"
+                                  onChange={(event) => setEditWhereBought(event.target.value)}
+                                  type="text"
+                                  value={editWhereBought}
+                                />
+                              </label>
+                              <label className="text-xs text-cyan-100/80">
+                                When Bought
+                                <input
+                                  className="mt-1 w-full rounded border border-cyan-700 bg-slate-950/65 px-2 py-1 text-sm text-cyan-100"
+                                  onChange={(event) => setEditPurchaseDate(event.target.value)}
+                                  type="date"
+                                  value={editPurchaseDate}
+                                />
+                              </label>
+                              <label className="text-xs text-cyan-100/80">
+                                Price
+                                <input
+                                  className="mt-1 w-full rounded border border-cyan-700 bg-slate-950/65 px-2 py-1 text-sm text-cyan-100"
+                                  min="0"
+                                  onChange={(event) => setEditShoePrice(event.target.value)}
+                                  step="0.01"
+                                  type="number"
+                                  value={editShoePrice}
+                                />
+                              </label>
+                              <label className="text-xs text-cyan-100/80">
+                                Wears
+                                <input
+                                  className="mt-1 w-full rounded border border-cyan-700 bg-slate-950/65 px-2 py-1 text-sm text-cyan-100"
+                                  min="0"
+                                  onChange={(event) => setEditWearCount(event.target.value)}
+                                  step="1"
+                                  type="number"
+                                  value={editWearCount}
+                                />
+                              </label>
+                              <label className="text-xs text-cyan-100/80 lg:col-span-2">
+                                Notes
+                                <textarea
+                                  className="mt-1 min-h-16 w-full rounded border border-cyan-700 bg-slate-950/65 px-2 py-1 text-sm text-cyan-100"
+                                  onChange={(event) => setEditShoeNotes(event.target.value)}
+                                  value={editShoeNotes}
+                                />
+                              </label>
+                              <label className="text-xs text-cyan-100/80 lg:col-span-2">
+                                Replace Image
+                                <input
+                                  accept="image/*"
+                                  className="mt-1 w-full rounded border border-cyan-700 bg-slate-950/65 px-2 py-1 text-sm text-cyan-100 file:mr-2 file:rounded file:border-0 file:bg-cyan-400/20 file:px-2 file:py-1"
+                                  onChange={handleEditShoeImageChange}
+                                  type="file"
+                                />
+                                {editShoeImageName ? (
+                                  <p className="mt-1 text-xs text-cyan-200/80">Selected: {editShoeImageName}</p>
+                                ) : null}
+                                {editShoeImageDataUrl ? (
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <img
+                                      alt="Edited shoe preview"
+                                      className="h-14 w-14 rounded border border-cyan-300/30 object-cover"
+                                      src={editShoeImageDataUrl}
+                                    />
+                                    <button
+                                      className="rounded border border-cyan-300/40 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-100 transition hover:bg-cyan-500/20"
+                                      onClick={() => {
+                                        setEditShoeImageDataUrl('');
+                                        setEditShoeImageName('');
+                                      }}
+                                      type="button"
+                                    >
+                                      Remove Image
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </label>
+                              <div className="flex items-end gap-1 lg:col-span-2 lg:justify-end">
+                                <button
+                                  className="rounded border border-emerald-300/50 bg-emerald-500/20 px-2 py-1 text-xs text-emerald-100 transition hover:bg-emerald-500/30"
+                                  onClick={() => handleSaveShoeEdit(shoe.id)}
+                                  type="button"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  className="rounded border border-cyan-300/40 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-100 transition hover:bg-cyan-500/20"
+                                  onClick={resetShoeEditState}
+                                  type="button"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      }
+
+                      return (
+                        <li className="border-t border-cyan-100/10 px-3 py-2" key={shoe.key ?? `${shoe.brand}-${shoe.name}-${index}`}>
+                          <div className="flex gap-3">
+                            {shoe.imageDataUrl ? (
+                              <img
+                                alt={`${shoe.brand} ${shoe.name}`}
+                                className="h-20 w-20 rounded-lg border border-cyan-300/30 object-cover"
+                                src={shoe.imageDataUrl}
+                              />
+                            ) : (
+                              <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-cyan-300/20 bg-cyan-900/25 text-[10px] uppercase tracking-widest text-cyan-200/80">
+                                No Image
+                              </div>
+                            )}
+
+                            <div className="min-w-0 flex-1">
+                              <div className="mb-1 flex flex-wrap items-start justify-between gap-2">
+                                <div>
+                                  <p className="font-medium text-cyan-50">{shoe.name}</p>
+                                  <p className="text-xs text-cyan-100/75">{shoe.brand}</p>
+                                </div>
+                                <p className="text-sm font-semibold text-cyan-100">{shoe.wearCount} wears</p>
+                              </div>
+
+                              <p className="text-xs text-cyan-200/80">
+                                {shoe.whereBought || 'Unknown store'}
+                                {shoe.purchaseDate ? ` • ${shoe.purchaseDate}` : ''}
+                              </p>
+                              <p className="text-sm text-emerald-300">{formatPrice(shoe.price)}</p>
+
+                              {shoe.notes ? <p className="mt-1 text-xs text-cyan-100/80">{shoe.notes}</p> : null}
+
+                              <div className="mt-2 flex justify-end gap-1">
+                                {needsConfirm ? (
+                                  <div className="inline-flex items-center gap-1">
+                                    <button
+                                      className="rounded border border-rose-300/50 bg-rose-500/20 px-2 py-1 text-xs text-rose-100 transition hover:bg-rose-500/30"
+                                      onClick={() => {
+                                        if (shoe.id && onDeleteShoeEntry) {
+                                          onDeleteShoeEntry(shoe.id);
+                                        }
+                                        setPendingDeleteId(null);
+                                      }}
+                                      type="button"
+                                    >
+                                      Confirm
+                                    </button>
+                                    <button
+                                      className="rounded border border-cyan-300/40 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-100 transition hover:bg-cyan-500/20"
+                                      onClick={() => setPendingDeleteId(null)}
+                                      type="button"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <button
+                                      className="rounded border border-cyan-300/45 bg-cyan-500/10 px-2 py-1 text-xs text-cyan-100 transition enabled:hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-45"
+                                      disabled={!canEdit}
+                                      onClick={() => startEditingShoe(shoe)}
+                                      type="button"
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      className="rounded border border-rose-300/45 bg-rose-500/10 px-2 py-1 text-xs text-rose-200 transition enabled:hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-45"
+                                      disabled={!canDelete}
+                                      onClick={() => {
+                                        if (shoe.id && onDeleteShoeEntry) {
+                                          resetShoeEditState();
+                                          setPendingDeleteId(shoe.id);
+                                        }
+                                      }}
+                                      type="button"
+                                    >
+                                      Delete
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
               </div>
-              <p className="text-sm text-cyan-100">{shoe.wearCount} wears</p>
-            </div>
-          </li>
-        ))}
-      </ul>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="rounded-lg border border-cyan-300/20 bg-black/20 px-3 py-2 text-sm text-cyan-100/80">
+          No shoes match this brand filter yet.
+        </p>
+      )}
     </section>
   );
 };
@@ -1418,12 +2035,16 @@ export const WidgetPanels = ({
   widget,
   pokerSessions,
   hikingSessions,
+  shoeCollection,
   onAddPokerSession,
   onDeletePokerSession,
   onUpdatePokerSession,
   onAddHikeSession,
   onDeleteHikeSession,
-  onUpdateHikeSession
+  onUpdateHikeSession,
+  onAddShoeEntry,
+  onDeleteShoeEntry,
+  onUpdateShoeEntry
 }) => {
   switch (widget.type) {
     case 'poker':
@@ -1447,7 +2068,14 @@ export const WidgetPanels = ({
     case 'workouts':
       return <WorkoutPanel />;
     case 'shoes':
-      return <ShoesPanel />;
+      return (
+        <ShoesPanel
+          onAddShoeEntry={onAddShoeEntry}
+          onDeleteShoeEntry={onDeleteShoeEntry}
+          onUpdateShoeEntry={onUpdateShoeEntry}
+          shoeCollection={shoeCollection}
+        />
+      );
     case 'calories':
       return <CaloriesPanel />;
     case 'business':
@@ -1486,9 +2114,12 @@ export const buildKpi = (widget, dashboardWindow, data = {}) => {
   }
 
   if (widget.type === 'shoes') {
+    const entries = (data.shoeCollection ?? shoeSeed).map((entry, index) => normalizeShoeEntry(entry, index));
+    const totalWears = entries.reduce((sum, entry) => sum + Math.max(0, entry.wearCount), 0);
+
     return {
-      main: `${shoes.length} total pairs`,
-      sub: `${shoes.filter((entry) => entry.status === 'Wishlist').length} in wishlist`
+      main: `${entries.length} total pairs`,
+      sub: `${totalWears} total wears logged`
     };
   }
 

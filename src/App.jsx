@@ -1,10 +1,15 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { useEffect } from 'react';
 import JarvisScene from './components/JarvisScene';
 import Dashboard from './components/Dashboard';
 import WidgetDetail from './components/WidgetDetail';
 import { buildKpi } from './components/WidgetPanels';
 import { coreWidgets, createCustomWidget } from './data/defaultWidgets';
-import { hikingSessions as hikingSessionSeed, pokerSessions as pokerSessionSeed } from './data/trackerData';
+import {
+  hikingSessions as hikingSessionSeed,
+  pokerSessions as pokerSessionSeed,
+  shoes as shoeSeed
+} from './data/trackerData';
 import { useLocalStorage } from './hooks/useLocalStorage';
 
 const App = () => {
@@ -12,6 +17,21 @@ const App = () => {
   const [dashboardWindow, setDashboardWindow] = useLocalStorage('jarvis.dashboardWindow', 'week');
   const [pokerSessions, setPokerSessions] = useLocalStorage('jarvis.pokerSessions', pokerSessionSeed);
   const [hikingSessions, setHikingSessions] = useLocalStorage('jarvis.hikingSessions', hikingSessionSeed);
+  const [shoeCollection, setShoeCollection] = useLocalStorage('jarvis.shoeCollection', shoeSeed);
+
+  useEffect(() => {
+    setShoeCollection((prev) => {
+      let hasChanges = false;
+      const migrated = prev.map((entry) => {
+        if (entry?.id) return entry;
+        hasChanges = true;
+        const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+        return { ...entry, id };
+      });
+
+      return hasChanges ? migrated : prev;
+    });
+  }, [setShoeCollection]);
 
   const handleAddWidget = (name, description) => {
     setWidgets((prev) => [...prev, createCustomWidget(name, description)]);
@@ -92,7 +112,37 @@ const App = () => {
     );
   };
 
-  const getWidgetKpi = (widget, window) => buildKpi(widget, window, { hikingSessions, pokerSessions });
+  const handleAddShoeEntry = (entry) => {
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`;
+    const shoe = { id, ...entry };
+
+    setShoeCollection((prev) =>
+      [shoe, ...prev].sort((a, b) => {
+        const brandCompare = (a.brand ?? '').localeCompare(b.brand ?? '');
+        if (brandCompare !== 0) return brandCompare;
+        return (a.name ?? '').localeCompare(b.name ?? '');
+      })
+    );
+  };
+
+  const handleDeleteShoeEntry = (entryId) => {
+    setShoeCollection((prev) => prev.filter((entry) => entry.id !== entryId));
+  };
+
+  const handleUpdateShoeEntry = (entryId, updates) => {
+    setShoeCollection((prev) =>
+      prev
+        .map((entry) => (entry.id === entryId ? { ...entry, ...updates } : entry))
+        .sort((a, b) => {
+          const brandCompare = (a.brand ?? '').localeCompare(b.brand ?? '');
+          if (brandCompare !== 0) return brandCompare;
+          return (a.name ?? '').localeCompare(b.name ?? '');
+        })
+    );
+  };
+
+  const getWidgetKpi = (widget, window) =>
+    buildKpi(widget, window, { hikingSessions, pokerSessions, shoeCollection });
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#050b15] font-body text-cyan-50">
@@ -125,9 +175,13 @@ const App = () => {
               onAddPokerSession={handleAddPokerSession}
               onDeleteHikeSession={handleDeleteHikeSession}
               onDeletePokerSession={handleDeletePokerSession}
+              onDeleteShoeEntry={handleDeleteShoeEntry}
               onUpdatePokerSession={handleUpdatePokerSession}
               onUpdateHikeSession={handleUpdateHikeSession}
+              onUpdateShoeEntry={handleUpdateShoeEntry}
+              onAddShoeEntry={handleAddShoeEntry}
               pokerSessions={pokerSessions}
+              shoeCollection={shoeCollection}
               widgets={widgets}
             />
           }
